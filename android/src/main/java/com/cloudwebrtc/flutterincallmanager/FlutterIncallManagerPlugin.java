@@ -1,5 +1,9 @@
 package com.cloudwebrtc.flutterincallmanager;
 
+import androidx.annotation.NonNull;
+import io.flutter.embedding.engine.plugins.FlutterPlugin;
+import io.flutter.embedding.engine.plugins.activity.ActivityAware;
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import io.flutter.plugin.common.EventChannel;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
@@ -49,15 +53,16 @@ import java.util.Set;
 import com.cloudwebrtc.flutterincallmanager.AppRTC.AppRTCBluetoothManager;
 import com.cloudwebrtc.flutterincallmanager.utils.ConstraintsMap;
 
-
 /**
  * FlutterIncallManagerPlugin
  */
-public class FlutterIncallManagerPlugin implements MethodCallHandler {
+public class FlutterIncallManagerPlugin implements MethodCallHandler, FlutterPlugin, ActivityAware {
 
     private static final String TAG = "InCallManager";
     private static SparseArray<String> mRequestPermissionCodeTargetPermission;
     private String mPackageName = "com.cloudwebrtc.incall";
+
+    private Activity activity;
 
     //Screen Manager
     private PowerManager mPowerManager;
@@ -105,6 +110,56 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
     private static final String SPEAKERPHONE_TRUE = "true";
     private static final String SPEAKERPHONE_FALSE = "false";
 
+    public Context getContext() {
+      return activity;
+    }
+
+    public Activity getActivity() {
+       return activity;
+    }
+
+    @Override
+    public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
+       init(binding);
+    }
+
+    @Override
+    public void onDetachedFromActivityForConfigChanges() {
+      activity = null;
+    }
+
+    @Override
+    public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
+       init(binding);
+    }
+
+    private void init(@NonNull ActivityPluginBinding binding) {
+       activity = binding.getActivity();
+       mWindowManager = (WindowManager) activity.getSystemService(Context.WINDOW_SERVICE);
+       mPowerManager = (PowerManager) activity.getSystemService(Context.POWER_SERVICE);
+       mPackageName = activity.getPackageName();
+       mWindowManager = (WindowManager) activity.getSystemService(Context.WINDOW_SERVICE);
+       mPowerManager = (PowerManager) activity.getSystemService(Context.POWER_SERVICE);
+       audioManager = ((AudioManager) activity.getSystemService(Context.AUDIO_SERVICE));
+       audioUriMap = new HashMap<String, Uri>();
+       audioUriMap.put("defaultRingtoneUri", defaultRingtoneUri);
+       audioUriMap.put("defaultRingbackUri", defaultRingbackUri);
+       audioUriMap.put("defaultBusytoneUri", defaultBusytoneUri);
+       audioUriMap.put("bundleRingtoneUri", bundleRingtoneUri);
+       audioUriMap.put("bundleRingbackUri", bundleRingbackUri);
+       audioUriMap.put("bundleBusytoneUri", bundleBusytoneUri);
+       mRequestPermissionCodeTargetPermission = new SparseArray<>();
+       mOnFocusChangeListener = new OnFocusChangeListener();
+       bluetoothManager = AppRTCBluetoothManager.create(activity, this);
+       proximityManager = InCallProximityManager.create(activity, this);
+       wakeLockUtils = new InCallWakeLockUtils(activity);
+    }
+
+    @Override
+    public void onDetachedFromActivity() {
+        activity = null;
+    }
+
     /**
      * AudioDevice is the names of possible audio devices that we currently
      * support.
@@ -148,12 +203,12 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
     private final String useSpeakerphone = SPEAKERPHONE_AUTO;
 
     // Handles all tasks related to Bluetooth headset devices.
-    private final AppRTCBluetoothManager bluetoothManager;
+    private AppRTCBluetoothManager bluetoothManager;
 
     //ProximityManager
-    private final InCallProximityManager proximityManager;
+    private InCallProximityManager proximityManager;
 
-    private final InCallWakeLockUtils wakeLockUtils;
+    private InCallWakeLockUtils wakeLockUtils;
 
     // Contains a list of available audio devices. A Set collection is used to
     // avoid duplicate elements.
@@ -168,8 +223,7 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
         public void stopPlay();
     }
 
-    private final Registrar registrar;
-    private final MethodChannel channel;
+    private MethodChannel channel;
     private EventChannel.EventSink eventSink = null;
 
     private EventChannel.StreamHandler streamHandler = new EventChannel.StreamHandler() {
@@ -184,49 +238,18 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
         }
     };
 
-    public Registrar registrar() {
-        return this.registrar;
-    }
-
-    public Activity getActivity() {
-        return registrar.activity();
-    }
-
-    public Context getContext() {
-        return registrar.context();
-    }
-
-    public static void registerWith(Registrar registrar) {
-        final MethodChannel channel = new MethodChannel(registrar.messenger(), "FlutterInCallManager.Method");
-        channel.setMethodCallHandler(new FlutterIncallManagerPlugin(registrar, channel));
-    }
-
-    private FlutterIncallManagerPlugin(Registrar registrar, MethodChannel channel) {
-        this.registrar = registrar;
-        this.channel = channel;
-        mWindowManager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
-        mPowerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
-        mPackageName = getContext().getPackageName();
-        mWindowManager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
-        mPowerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
-        audioManager = ((AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE));
-        audioUriMap = new HashMap<String, Uri>();
-        audioUriMap.put("defaultRingtoneUri", defaultRingtoneUri);
-        audioUriMap.put("defaultRingbackUri", defaultRingbackUri);
-        audioUriMap.put("defaultBusytoneUri", defaultBusytoneUri);
-        audioUriMap.put("bundleRingtoneUri", bundleRingtoneUri);
-        audioUriMap.put("bundleRingbackUri", bundleRingbackUri);
-        audioUriMap.put("bundleBusytoneUri", bundleBusytoneUri);
-        mRequestPermissionCodeTargetPermission = new SparseArray<String>();
-        mOnFocusChangeListener = new OnFocusChangeListener();
-        bluetoothManager = AppRTCBluetoothManager.create(getContext(), this);
-        proximityManager = InCallProximityManager.create(getContext(), this);
-        wakeLockUtils = new InCallWakeLockUtils(getContext());
-        EventChannel eventChannel = new EventChannel(registrar.messenger(), "FlutterInCallManager.Event");
+    @Override
+    public void onAttachedToEngine(@NonNull FlutterPluginBinding binding) {
+        channel = new MethodChannel(binding.getBinaryMessenger(), "FlutterInCallManager.Method");
+        channel.setMethodCallHandler(this);
+        EventChannel eventChannel = new EventChannel(binding.getBinaryMessenger(), "FlutterInCallManager.Event");
         eventChannel.setStreamHandler(streamHandler);
-        Log.d(TAG, "InCallManager initialized");
     }
 
+    @Override
+    public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
+        channel.setMethodCallHandler(null);
+    }
 
     @Override
     public void onMethodCall(MethodCall call, Result result) {
@@ -316,8 +339,8 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
             setSpeakerphoneOn(origIsSpeakerPhoneOn);
             setMicrophoneMute(origIsMicrophoneMute);
             audioManager.setMode(origAudioMode);
-            if (getActivity() != null) {
-                getActivity().setVolumeControlStream(AudioManager.USE_DEFAULT_STREAM_TYPE);
+            if (activity != null) {
+                activity.setVolumeControlStream(AudioManager.USE_DEFAULT_STREAM_TYPE);
             }
             isOrigAudioSetupStored = false;
         }
@@ -357,9 +380,8 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
                     }
                 }
             };
-            Context reactContext = getContext();
-            if (reactContext != null) {
-                reactContext.registerReceiver(wiredHeadsetReceiver, filter);
+            if (activity != null) {
+                activity.registerReceiver(wiredHeadsetReceiver, filter);
             } else {
                 Log.d(TAG, "startWiredHeadsetEvent() reactContext is null");
             }
@@ -394,9 +416,8 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
                     }
                 }
             };
-            Context reactContext = getContext();
-            if (reactContext != null) {
-                reactContext.registerReceiver(noisyAudioReceiver, filter);
+            if (activity != null) {
+               activity.registerReceiver(noisyAudioReceiver, filter);
             } else {
                 Log.d(TAG, "startNoisyAudioEvent() reactContext is null");
             }
@@ -464,9 +485,8 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
                     }
                 }
             };
-            Context reactContext = getContext();
-            if (reactContext != null) {
-                reactContext.registerReceiver(mediaButtonReceiver, filter);
+            if (activity != null) {
+                activity.registerReceiver(mediaButtonReceiver, filter);
             } else {
                 Log.d(TAG, "startMediaButtonEvent() reactContext is null");
             }
@@ -754,13 +774,12 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
     private void manualTurnScreenOff() {
         Log.d(TAG, "manualTurnScreenOff()");
 
-        Activity mCurrentActivity = getActivity();
-        if (mCurrentActivity == null) {
+        if (activity == null) {
             Log.d(TAG, "ReactContext doesn't hava any Activity attached.");
             return;
         }
-        mCurrentActivity.runOnUiThread(() -> {
-            Window window = mCurrentActivity.getWindow();
+        activity.runOnUiThread(() -> {
+            Window window = activity.getWindow();
             WindowManager.LayoutParams params = window.getAttributes();
             lastLayoutParams = params; // --- store last param
             params.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_OFF; // --- Dim as dark as possible. see BRIGHTNESS_OVERRIDE_OFF
@@ -776,13 +795,12 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
         Log.d(TAG, "manualTurnScreenOn()");
 
 
-        Activity mCurrentActivity = getActivity();
-        if (mCurrentActivity == null) {
+        if (activity == null) {
             Log.d(TAG, "ReactContext doesn't hava any Activity attached.");
             return;
         }
-        mCurrentActivity.runOnUiThread(() -> {
-            Window window = mCurrentActivity.getWindow();
+        activity.runOnUiThread(() -> {
+            Window window = activity.getWindow();
             if (lastLayoutParams != null) {
                 window.setAttributes(lastLayoutParams);
             } else {
@@ -801,12 +819,11 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
      */
     public void setKeepScreenOn(final boolean enabled) {
 
-        Activity mCurrentActivity = getActivity();
-        if (mCurrentActivity == null) {
+        if (activity == null) {
             return;
         }
-        mCurrentActivity.runOnUiThread(() -> {
-            Window window = mCurrentActivity.getWindow();
+        activity.runOnUiThread(() -> {
+            Window window = activity.getWindow();
             if (enabled) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             } else {
@@ -1191,9 +1208,8 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
         if (type.equals("_BUNDLE_")) {
             if (audioUriMap.get(uriBundle) == null) {
                 int res = 0;
-                Context reactContext = getContext();
-                if (reactContext != null) {
-                    res = reactContext.getResources().getIdentifier(fileBundle, "raw", mPackageName);
+                if (activity != null) {
+                    res = activity.getResources().getIdentifier(fileBundle, "raw", mPackageName);
                 } else {
                     Log.d(TAG, "getAudioUri() reactContext is null");
                 }
@@ -1412,8 +1428,7 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
                 int stream = (Integer) data.get("audioStream");
                 String name = (String) data.get("name");
 
-                Context reactContext = getContext();
-                setDataSource(reactContext, sourceUri);
+                setDataSource(activity, sourceUri);
                 setLooping(setLooping);
                 setAudioStreamType(stream); // is better using STREAM_DTMF for ToneGenerator?
 
@@ -1490,8 +1505,7 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
 
     private String _checkPermission(String targetPermission) {
         try {
-            Context reactContext = getContext();
-            if (ContextCompat.checkSelfPermission(reactContext, targetPermission) == PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(activity, targetPermission) == PackageManager.PERMISSION_GRANTED) {
                 return "granted";
             } else {
                 return "denied";
@@ -1552,15 +1566,14 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
     }
 
     private void _requestPermission(String targetPermission) {
-        Activity currentActivity = getActivity();
-        if (currentActivity == null) {
+        if (activity == null) {
             Log.d(TAG, String.format("RNInCallManager._requestPermission(): ReactContext doesn't hava any Activity attached when requesting %s", targetPermission));
             //promise.reject(new Exception("_requestPermission(): currentActivity is not attached"));
             return;
         }
     int requestPermissionCode = getRandomInteger(1, 65535);
         mRequestPermissionCodeTargetPermission.put(requestPermissionCode, targetPermission);
-        ActivityCompat.requestPermissions(currentActivity, new String[]{targetPermission}, requestPermissionCode);
+        ActivityCompat.requestPermissions(activity, new String[]{targetPermission}, requestPermissionCode);
     }
 
     private static int getRandomInteger(int min, int max) {
@@ -1702,17 +1715,16 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
      * Helper method for receiver registration.
      */
     private void registerReceiver(BroadcastReceiver receiver, IntentFilter filter) {
-        getContext().registerReceiver(receiver, filter);
+       activity.registerReceiver(receiver, filter);
     }
 
     /**
      * Helper method for unregistration of an existing receiver.
      */
     private void unregisterReceiver(final BroadcastReceiver receiver) {
-        final Context reactContext = this.getContext();
-        if (reactContext != null) {
+        if (activity != null) {
             try {
-                reactContext.unregisterReceiver(receiver);
+                activity.unregisterReceiver(receiver);
             } catch (final Exception e) {
                 Log.d(TAG, "unregisterReceiver() failed");
             }
@@ -1747,7 +1759,7 @@ public class FlutterIncallManagerPlugin implements MethodCallHandler {
      * Gets the current earpiece state.
      */
     private boolean hasEarpiece() {
-        return getContext().getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY);
+        return activity.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TELEPHONY);
     }
 
     /**
